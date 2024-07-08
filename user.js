@@ -18,20 +18,20 @@
         // Apply patches to the state JSON.
         stateJson.user.hasPlus = true;
 
-        // Write the patches back to the state.
+        // Write the patches back to the state element.
         state.innerHTML = JSON.stringify(stateJson);
 
         // Delete the tab viewer so that the website creates a new one, now with our patches.
         window.document.getElementById("apptab").remove();
 
-        // Occasionally the tab viewer doesn't seem to be recreated, so just reload the site if it doesn't exist by the time the load event is fired.
-        // Bit hacky but the problem doesn't occur all that often and this works well enough when it does.
+        // Occasionally the tab viewer doesn't seem to get recreated, so just reload the site if it doesn't exist by the time the load event is fired.
+        // Bit hacky, but the problem doesn't occur all that often and this works well enough when it does.
         window.addEventListener("load", (event) => {
             if (window.document.getElementById("apptab") == null) {
                 window.location.reload();
             }
         });
     } catch (err) {
-        window.alert("Songsterr Plus Patcher error:\n    " + err + "\n\nMake sure the userscript is updated. If the issue persists, feel free to report it to https://github.com/Strikeless/SongsterrPlusPatcher");
+        window.alert("Songsterr Plus Patcher error:\n    " + err + "\n\nMake sure the userscript is up to date. If the issue persists, feel free to report it at https://github.com/Strikeless/SongsterrPlusPatcher");
     }
 })();
