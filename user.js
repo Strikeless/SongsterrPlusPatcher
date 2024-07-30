@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.0.0
+// @version 1.0.1
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -23,6 +23,9 @@
 
         // Delete the tab viewer so that the website creates a new one, now with our patches.
         window.document.getElementById("apptab").remove();
+
+        // Do the same for the search panel if it exists, to fix the filter bar being too tall due to a removed plus advertisement.
+        window.document.getElementById("panel-search")?.remove();
 
         // Occasionally the tab viewer doesn't seem to get recreated, so just reload the site if it doesn't exist by the time the load event is fired.
         // Bit hacky, but the problem doesn't occur all that often and this works well enough when it does.
