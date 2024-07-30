@@ -25,7 +25,8 @@
         window.document.getElementById("apptab").remove();
 
         // Do the same for the search panel if it exists, to fix the filter bar being too tall due to a removed plus advertisement.
-        window.document.getElementById("panel-search")?.remove();
+        const searchPanelElement = window.document.getElementById("panel-search");
+        if (searchPanelElement != null) searchPanelElement.remove();
 
         // Occasionally the tab viewer doesn't seem to get recreated, so just reload the site if it doesn't exist by the time the load event is fired.
         // Bit hacky, but the problem doesn't occur all that often and this works well enough when it does.
