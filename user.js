@@ -1,41 +1,90 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.0.1
+// @version 1.1.0
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
 // @match http*://*.songsterr.com/*
-// @run-at document-end
+// @run-at document-start
+// @grant unsafeWindow
 // ==/UserScript==
 
 (function () {
+    function notifyError(err) {
+        alert(
+            "Songsterr Plus Patcher encountered an error."
+            + "\nfeel free to report this issue at https://github.com/Strikeless/SongsterrPlusPatcher ."
+            + "\nIf the issue persists, you can disable the userscript and try some of the other userscripts for Songsterr on Greasyfork."
+            + "\n    (alternatively, consider subscribing Songsterr plus, if you have the money to throw and you enjoy their service.)"
+            + "\n\n" + err
+        );
+    }
+
     try {
-        // Get the state element and parse it.
-        const state = window.document.getElementById("state");
-        const stateJson = JSON.parse(state.innerHTML);
+        const fetchParent = unsafeWindow || window; // unsafeWindow required to wrap the fetch function in the same context that the actual site uses.
+        const innerFetch = fetchParent.fetch;
 
-        // Apply patches to the state JSON.
-        stateJson.user.hasPlus = true;
+        function mockProfile(profile) {
+            if (profile.plan == "plus") {
+                console.log("Songsterr Plus Patcher: You already have Songsterr plus!");
+                return profile;
+            }
 
-        // Write the patches back to the state element.
-        state.innerHTML = JSON.stringify(stateJson);
+            profile.plan = "plus";
+            profile.subscription = {
+                plan: {
+                    id: "plus"
+                }
+            };
 
-        // Delete the tab viewer so that the website creates a new one, now with our patches.
-        window.document.getElementById("apptab").remove();
+            return profile;
+        }
 
-        // Do the same for the search panel if it exists, to fix the filter bar being too tall due to a removed plus advertisement.
-        const searchPanelElement = window.document.getElementById("panel-search");
-        if (searchPanelElement != null) searchPanelElement.remove();
+        /*
+         * Wrap the fetch function in our own version that intercepts requests to the profile detail endpoint, mocking plus status.
+         */
+        function interceptingFetch(resource, options) {
+            var resource_url = JSON.stringify(resource); // Not really sure if JSON.stringify is the right tool for the job, but it works. (unlike toString)
 
-        // Occasionally the tab viewer doesn't seem to get recreated, so just reload the site if it doesn't exist by the time the load event is fired.
-        // Bit hacky, but the problem doesn't occur all that often and this works well enough when it does.
-        window.addEventListener("load", (event) => {
-            if (window.document.getElementById("apptab") == null) {
-                window.location.reload();
+            if (resource_url.includes("/auth/profile")) {
+                console.log("Songsterr Plus Patcher: Intercepting /auth/profile request to " + resource_url + ".");
+
+                return innerFetch(resource, options)
+                    .then(response => response.json())
+                    .then(responseProfile => mockProfile(responseProfile))
+                    .then(mockedProfile => new Response(JSON.stringify(mockedProfile)))
+                    .catch(err => notifyError(err));
+            } else {
+                return innerFetch(resource, options);
+            }
+        }
+
+        Object.defineProperty(fetchParent, "fetch", {
+            value: function () {
+                return interceptingFetch(...arguments);
+            },
+            configurable: true,
+            enumerable: false,
+            writable: true,
+        });
+
+        document.addEventListener("DOMContentLoaded", () => {
+            try {
+                /*
+                 * Additionally change use.hasPlus to true in the state JSON. This is the old way things were done, and
+                 * no longer seems to be necessary with mocked profile responses, but probably wont do any harm either.
+                 */
+                const stateElement = document.getElementById("state");
+                const stateJson = JSON.parse(stateElement.innerHTML);
+
+                stateJson.user.hasPlus = true;
+                stateElement.innerHTML = JSON.stringify(stateJson);
+            } catch (err) {
+                notifyError(err);
             }
         });
     } catch (err) {
-        window.alert("Songsterr Plus Patcher error:\n    " + err + "\n\nMake sure the userscript is up to date. If the issue persists, feel free to report it at https://github.com/Strikeless/SongsterrPlusPatcher");
+        notifyError(err);
     }
 })();
