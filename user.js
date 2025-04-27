@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.1.0
+// @version 1.1.1
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -80,6 +80,15 @@
 
                 stateJson.user.hasPlus = true;
                 stateElement.innerHTML = JSON.stringify(stateJson);
+
+                /*
+                 * For some reason when reloading or opening a tab directly via URL, the tab viewer doesn't load the actual tablature.
+                 * This attempts to fix the issue by removing the parent apptab element, hopefully resulting in the site recreating it with the tablature.
+                 */
+                if (document.getElementById("tablature") == null) {
+                    console.log("Songsterr Plus Patcher: tablature element doesn't exist, attempting to fix by removing entire apptab element and letting site recreate it.");
+                    document.getElementById("apptab").remove();
+                }
             } catch (err) {
                 notifyError(err);
             }
