@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.2.0
+// @version 1.2.1
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -72,14 +72,43 @@
         document.addEventListener("DOMContentLoaded", () => {
             try {
                 /*
-                 * Additionally change use.hasPlus to true in the state JSON. This is the old way things were done, and
-                 * no longer seems to be necessary with mocked profile responses, but probably wont do any harm either.
+                 * Additionally change user.hasPlus to true and user.profile.plan to "plus" in the state JSON.
                  */
                 const stateElement = document.getElementById("state");
                 const stateJson = JSON.parse(stateElement.innerHTML);
 
                 stateJson.user.hasPlus = true;
-                stateJson.user.profile.plan = "plus";
+                if (stateJson.user.profile != null) {
+                    stateJson.user.profile.plan = "plus";
+                } else {
+                    // Logged out user, faking a whole profile here to circumvent problems.
+                    stateJson.user.profile = {
+                        id: 100000000,
+                        uid: 100000000,
+                        email: "fakeforplus@example.com",
+                        name: "fakeforplus",
+                        plan: "plus",
+                        permissions: [],
+                        subscription: null,
+                        sra_license: "none",
+                        bonus: {
+                            activeStart: null,
+                            activeEnd: null,
+                            balance: 0,
+                            balanceMinutes: 0
+                        },
+                        bonusPurchasedFeatures: [],
+                        signature: "invalid_signature_with_no_purpose_other_than_to_exist",
+                        created_at: "2025-00-00T00:00:00.000Z",
+                        last_signin_date: "2025-00-00T00:00:00.000Z",
+                        hadPlusBeforeSE: false,
+                        password_change_required: false,
+                        preferencesNotifications: {
+                            notificationsEmails: false,
+                            researchEmails: false
+                        }
+                    };
+                }
                 stateElement.innerHTML = JSON.stringify(stateJson);
 
                 /*
