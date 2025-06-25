@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.1.1
+// @version 1.2.0
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -79,6 +79,7 @@
                 const stateJson = JSON.parse(stateElement.innerHTML);
 
                 stateJson.user.hasPlus = true;
+                stateJson.user.profile.plan = "plus";
                 stateElement.innerHTML = JSON.stringify(stateJson);
 
                 /*
