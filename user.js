@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.2.1
+// @version 1.2.2
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -69,7 +69,7 @@
             writable: true,
         });
 
-        document.addEventListener("DOMContentLoaded", () => {
+        window.addEventListener("DOMContentLoaded", () => {
             try {
                 /*
                  * Additionally change user.hasPlus to true and user.profile.plan to "plus" in the state JSON.
