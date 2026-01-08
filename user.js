@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name Songsterr Plus Patcher
-// @namespace https://github.com/Strikeless
-// @version 1.2.2
-// @description Trick Songsterr to unlock plus features.
-// @license The Unlicense
-// @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
-// @match http*://*.songsterr.com/*
-// @run-at document-start
-// @grant unsafeWindow
+// @name            Songsterr Plus Patcher
+// @namespace       https://github.com/Strikeless
+// @version         1.2.3
+// @icon            https://songsterr.com/favicon.ico
+// @description     Trick Songsterr to unlock plus features.
+// @license         The Unlicense
+// @supportURL      https://github.com/Strikeless/SongsterrPlusPatcher
+// @match           http*://*.songsterr.com/*
+// @run-at          document-start
+// @grant           unsafeWindow
 // ==/UserScript==
 
 (function () {
