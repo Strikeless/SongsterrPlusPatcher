@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.2.2
+// @version 1.2.3-PATCHED
 // @description Trick Songsterr to unlock plus features.
 // @license The Unlicense
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -11,6 +11,8 @@
 // ==/UserScript==
 
 (function () {
+    console.log("Songsterr Plus Patcher: Patched as of 2026-08-24. This version does nothing to avoid your account possibly getting flagged. Working on a fix, script should be updated soon.");
+    /*
     function notifyError(err) {
         alert(
             "Songsterr Plus Patcher encountered an error."
@@ -43,7 +45,7 @@
 
         /*
          * Wrap the fetch function in our own version that intercepts requests to the profile detail endpoint, mocking plus status.
-         */
+         * /
         function interceptingFetch(resource, options) {
             var resource_url = JSON.stringify(resource); // Not really sure if JSON.stringify is the right tool for the job, but it works. (unlike toString)
 
@@ -73,7 +75,7 @@
             try {
                 /*
                  * Additionally change user.hasPlus to true and user.profile.plan to "plus" in the state JSON.
-                 */
+                 * /
                 const stateElement = document.getElementById("state");
                 const stateJson = JSON.parse(stateElement.innerHTML);
 
@@ -114,7 +116,7 @@
                 /*
                  * For some reason when reloading or opening a tab directly via URL, the tab viewer doesn't load the actual tablature.
                  * This attempts to fix the issue by removing the parent apptab element, hopefully resulting in the site recreating it with the tablature.
-                 */
+                 * /
                 if (document.getElementById("tablature") == null) {
                     console.log("Songsterr Plus Patcher: tablature element doesn't exist, attempting to fix by removing entire apptab element and letting site recreate it.");
                     document.getElementById("apptab").remove();
@@ -126,4 +128,5 @@
     } catch (err) {
         notifyError(err);
     }
+    */
 })();
