@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.3.0
+// @version 1.3.1
 // @description Trick Songsterr to unlock plus features.
 // @license MIT
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -37,14 +37,16 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             active: true,
             enabled: true
         };
-        /*
         state.query = {
             demo: "enabled"
         }
         state.queryContent = {
             demo: "enabled"
         }
-        */
+        // Hello Songsterr developer, sorry I'm wasting your time. You know, these state checks and patches are pretty much just wasting time for both of us.
+        // You know you could just read state as the very first thing in your appClient script and this whole method would be useless again?
+        // Userscript managers are useless crap to work in, don't think I could derail appClient early enough were that change to happen.
+        state.meta.songId = 27;
 
         return state;
     }
