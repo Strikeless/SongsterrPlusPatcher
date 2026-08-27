@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.3.1
+// @version 1.3.2
 // @description Trick Songsterr to unlock plus features.
-// @license MIT
-// @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
-// @match http*://*.songsterr.com/*
-// @run-at document-start
-// @grant unsafeWindow
+// @author       Stalker2284835, temporary solution inspired by GoulagmanYt
+// @match        *://*.songsterr.com/*
+// @grant        unsafeWindow
+// @grant        GM_addStyle
+// @run-at       document-start
+// @license      MIT
 // ==/UserScript==
 
 /*
@@ -20,132 +21,308 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+
 (function () {
     'use strict';
 
-    // unsafeWindow refers to "the original window object of the webpage that allows reading or modifying global variables",
-    // which we must use if we want to modify things when running in a userscript manager with sandboxing (probably all the major ones?).
-    // https://violentmonkey.github.io/api/gm/#unsafewindow
-    const win = unsafeWindow || window;
+    console.log('%c[Songsterr Plus Patcher] Active v1.3.2', 'color:#4caf50;font-weight:bold');
 
-    function patchStateData(state) {
-        /*
-         * Fake demo mode for plus features.
-         * This has become easier than faking a plus profile, which would now require nulling a signature check (with asymmetric keys) and a bunch of request spoofing.
-         */
-        state.demo = {
-            active: true,
-            enabled: true
-        };
-        state.query = {
-            demo: "enabled"
-        }
-        state.queryContent = {
-            demo: "enabled"
-        }
-        // Hello Songsterr developer, sorry I'm wasting your time. You know, these state checks and patches are pretty much just wasting time for both of us.
-        // You know you could just read state as the very first thing in your appClient script and this whole method would be useless again?
-        // Userscript managers are useless crap to work in, don't think I could derail appClient early enough were that change to happen.
-        state.meta.songId = 27;
+    try {
+        localStorage.removeItem('persist:root');
+        localStorage.removeItem('painTextTopbar');
+    } catch (e) { }
 
-        return state;
+    const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const MAGIC_ID = Math.floor(9e8 * Math.random()) + 1e8;
+    const PREMIUM_FEATURES = ['print', 'export', 'download', 'speed', 'loop', 'solo', 'mute', 'pitchshift', 'retune', 'slowdown'];
+
+    const MAGIC_PROFILE = {
+        id: MAGIC_ID,
+        uid: MAGIC_ID,
+        email: `plususer${MAGIC_ID}@songsterr.com`,
+        name: 'Songsterr User',
+        plan: 'plus',
+        hasPlus: true,
+        permissions: [],
+        subscription: { plan: { id: 'plus' } },
+        bonus: {
+            activeStart: new Date(Date.now() - 60000).toISOString(),
+            activeEnd: new Date(Date.now() + 86400000).toISOString(),
+            balanceMinutes: 999999
+        },
+        bonusPurchasedFeatures: [],
+        signature: 'patched_signature',
+        hadPlusBeforeSE: true
+    };
+
+    function buildMagicProfile(songId) {
+        const features = songId ? [{ songId: Number(songId), features: PREMIUM_FEATURES }] : [];
+        return { ...MAGIC_PROFILE, bonusPurchasedFeatures: features };
     }
 
-    let appMutationObserverApplied = false;
-    /// Whenever the tab viewer is switched by the site, it gets reset to the non-demo version.
-    /// This function starts an observer that will try to detect that and reload the site to get demo mode again.
-    // TODO: This is stupid, the reloads are annoying. Would be great if we figured out how to get the demo mode to stay without a full page reload.
-    function applyAppMutationObserver() {
-        if (appMutationObserverApplied) return;
-        appMutationObserverApplied = true;
+    function getSongIdFromUrl(url) {
+        const m = String(url || location.href).match(/\/s(\d+)(?:\/|$)/) ||
+            String(url || location.href).match(/\/(?:songs?|meta)\/(\d+)/);
+        return m ? m[1] : null;
+    }
 
-        const appElement = document.getElementById("app");
-        if (appElement == null) {
-            console.log("SongsterrPlusPatcher: Didn't find app element, manual reloads will be necessary.");
-            return;
+    function patchPremiumAccess(data, fallbackSongId) {
+        if (!data || typeof data !== 'object') return data;
+        const songId = data.meta?.current?.songId || data.meta?.songId ||
+            data.current?.songId || data.songId || data.id || fallbackSongId;
+        const profile = buildMagicProfile(songId);
+
+        if (data.user) {
+            data.user.hasPlus = true;
+            data.user.isLoggedIn = true;
+            data.user.profile = profile;
+            data.user.bonusPurchasedFeatures = profile.bonusPurchasedFeatures;
         }
-
-        const appElementObserverCallback = (mutationList, observer) => {
-            for (const mutation of mutationList) {
-                if (mutation.type != "childList") continue;
-
-                let lockIconElements = document.getElementsByClassName("_8e144G_lock");
-                if (lockIconElements.length == 0) continue;
-
-                console.log("SongsterrPlusPatcher: Lost demo mode, reloading.");
-                window.location.reload();
-            }
-        };
-        new MutationObserver(appElementObserverCallback).observe(appElement, { childList: true });
-    }
-
-    function appClientEarlyHook() {
-        console.log("SongsterrPlusPatcher: Running appClient early hook");
-
-        const stateJsonElement = document.getElementById("state");
-        const stateData = JSON.parse(stateJsonElement.innerHTML);
-        const stateDataPatched = patchStateData(stateData);
-        stateJsonElement.innerHTML = JSON.stringify(stateDataPatched);
-
-        // The apptab has already been populated with buttons for free users, so remove this "stale" version.
-        // The site should create the apptab again, now with patched state.
-        document.getElementById("apptab").remove();
-
-        // Initial patching done, but we still have some UI fixing to do once the new apptab is ready.
-        // Observe for the added apptab, and run the late hook once the new apptab has been added.
-        const apptabAddedObserverCallback = (mutationList, observer) => {
-            for (const mutation of mutationList) {
-                if (mutation.type != "childList") continue;
-
-                for (const addedChildNode of mutation.addedNodes) {
-                    if (addedChildNode.id != "apptab") continue;
-                    observer.disconnect();
-                    apptabLateHook();
-                }
-            }
-        };
-        const apptabParentElement = document.getElementById("app");
-        new MutationObserver(apptabAddedObserverCallback).observe(apptabParentElement, { childList: true });
-
-        applyAppMutationObserver();
-    }
-
-    function apptabLateHook() {
-        console.log("SongsterrPlusPatcher: Running apptab late hook");
-
-        // Since the site thinks we're in demo mode, some links have ?demo=enabled appended to them.
-        // We don't need that nor do we really want to confuse the server with demo mode when it disagrees.
-        const demoLinkElements = document.querySelectorAll("a[href*='?demo=']");
-        for (const demoLinkElement of demoLinkElements) {
-            demoLinkElement.outerHTML = demoLinkElement.outerHTML
-                .replaceAll("?demo=enabled", "")
-                .replaceAll("?demo=disabled", "");
-        }
-
-        const demoSongMarkerElement = document.querySelector("a[class*='_demo']");
-        if (demoSongMarkerElement != null) demoSongMarkerElement.remove();
-
-        const topBarPlusButtonElement = document.querySelector("div:has(> #menu-plus)");
-        if (topBarPlusButtonElement != null) topBarPlusButtonElement.remove();
-
-        const headerRegenerateElement = document.getElementById("header-regenerate");
-        if (headerRegenerateElement != null) headerRegenerateElement.remove();
-    }
-
-    // The site's appClient script reads __APP_INITIALIZED very early on (before it has read state or anything like that).
-    // Hook a getter in front of that variable, where we will run our early patching code, before appClient gets a chance to do anything meaningful.
-    let appInitializedValue = false;
-    Object.defineProperty(
-        win,
-        "__APP_INITIALISED",
-        {
-            get() {
-                appClientEarlyHook();
-                return appInitializedValue;
-            },
-            set(value) {
-                appInitializedValue = value;
+        if (data.meta) {
+            data.meta.allowedByLicense = true;
+            if (data.meta.current) {
+                data.meta.current.allowedByLicense = true;
+                data.meta.current.isAllowDownload = true;
             }
         }
-    );
+        if ('allowedByLicense' in data) data.allowedByLicense = true;
+        if ('isAllowDownload' in data) data.isAllowDownload = true;
+        if (data.current) {
+            data.current.allowedByLicense = true;
+            data.current.isAllowDownload = true;
+        }
+        if (data.bonus) data.bonus.activatingPlus = true;
+        if (data.player) {
+            data.player.locks = [];
+            data.player.constraints = null;
+        }
+        if (data.painTextTopbar) {
+            data.painTextTopbar.pain = null;
+            data.painTextTopbar.closedAt = null;
+        }
+        if (data.print) data.print.pending = false;
+        return data;
+    }
+
+    function jsonResponse(data, status = 200) {
+        return new Response(JSON.stringify(data), {
+            status,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+
+    function getMockedResponse(url, method) {
+        let path;
+        try { path = new URL(String(url), location.origin).pathname; }
+        catch { path = String(url); }
+
+        if (/\/api\/preferences?$/.test(path)) {
+            return jsonResponse(method === 'GET' ? { multirestEnabled: true, writtenPitchNotation: false } : {});
+        }
+        if (/\/api\/(user-playlist|playlist)$/.test(path)) {
+            return jsonResponse({ songs: [], playlists: [] });
+        }
+        if (/\/api\/favorites$/.test(path)) {
+            return jsonResponse([]);
+        }
+        if (/\/api\/contributions\/available-tracks$/.test(path)) {
+            return jsonResponse({
+                availableTracks: [],
+                soloQuotaAvailable: true,
+                backingQuotaAvailable: true,
+                updatedAt: Date.now()
+            });
+        }
+        if (/\/api\/contributions\//.test(path)) {
+            return jsonResponse([]);
+        }
+        return null;
+    }
+
+    // ========== FETCH HOOK ==========
+    const originalFetch = win.fetch;
+
+    const hookedFetch = async function (resource, options) {
+        const url = (typeof resource === 'object' && resource instanceof Request) ? resource.url : String(resource || '');
+        const method = String(options?.method || (resource?.method) || 'GET').toUpperCase();
+
+        if (url.includes('/auth/profile')) {
+            return jsonResponse(buildMagicProfile(getSongIdFromUrl(location.href)));
+        }
+
+        const mocked = getMockedResponse(url, method);
+        if (mocked) return mocked;
+
+        if (url.includes('/api/meta/') || url.includes('/api/songs/') ||
+            url.includes('/api/tab/') || url.includes('/api/song/')) {
+            try {
+                const response = await originalFetch(resource, options);
+                const data = await response.clone().json().catch(() => null);
+                if (!data || typeof data !== 'object') return response;
+
+                patchPremiumAccess(data, data.songId || data.id || getSongIdFromUrl(url));
+
+                const headers = new Headers(response.headers);
+                headers.delete('content-encoding');
+                headers.delete('content-length');
+                headers.set('Content-Type', 'application/json');
+
+                return new Response(JSON.stringify(data), {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers
+                });
+            } catch (e) {
+                return originalFetch(resource, options);
+            }
+        }
+
+        if (/(sentry|logs|analytics|useraudio)/i.test(url)) {
+            return new Response('{}', { status: 200 });
+        }
+
+        return originalFetch(resource, options);
+    };
+
+    try {
+        Object.defineProperty(win, 'fetch', {
+            value: hookedFetch,
+            writable: false,
+            configurable: false
+        });
+        console.log('%c[Songsterr Plus Patcher] fetch hook installed', 'color:#4caf50');
+    } catch (e) {
+        win.fetch = hookedFetch;
+        console.log('%c[Songsterr Plus Patcher] fetch hook installed (fallback)', 'color:#4caf50');
+    }
+
+    // ========== STATE PATCH ==========
+    function patchState() {
+        const el = document.getElementById('state');
+        if (!el) return false;
+        try {
+            const text = el.textContent.trim();
+            if (!text) return false;
+            const data = JSON.parse(text);
+            const songId = data.meta?.current?.songId || data.meta?.songId || data.part?.songId;
+            data.user = data.user || {};
+            data.bonus = data.bonus || {};
+            patchPremiumAccess(data, songId);
+            data.consent = { loading: false, suite: 'tcf', view: 'none' };
+            const patched = JSON.stringify(data);
+            if (el.textContent !== patched) {
+                el.textContent = patched;
+                console.log('%c[Songsterr Plus Patcher] #state patched', 'color:#4caf50');
+                return true;
+            }
+        } catch (e) { }
+        return false;
+    }
+
+    const stateObs = new MutationObserver(() => {
+        if (patchState()) stateObs.disconnect();
+    });
+    if (document.documentElement) {
+        stateObs.observe(document.documentElement, { childList: true, subtree: true });
+    }
+    setTimeout(patchState, 50);
+    setTimeout(patchState, 400);
+    setTimeout(patchState, 1200);
+
+    // ========== CSS ==========
+    GM_addStyle(`
+        #promo, #menu-plus, a[href="/plus"], a[href^="/plus?"],
+        #menu-account [class*="hasPlusSurface"] {
+            display: none !important; visibility: hidden !important;
+        }
+        #tuning-button-location [class*="_lock"],
+        #tuning-button-location [class*="_wrapper"],
+        button[id^="mixer-solo-"] svg[class*="_lock"],
+        button[id^="mixer-mute-"] svg[class*="_lock"],
+        button[id^="mixer-solo-"] svg[class*="_plus"],
+        button[id^="mixer-mute-"] svg[class*="_plus"] {
+            display: none !important; visibility: hidden !important;
+        }
+
+        /* Fix the BPM button on touch devices */
+        .uRMlwq_bpm button:before,
+        [class*="_bpm"] button:before {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            content: '';
+            scale: 2;
+        }
+
+        .uRMlwq_bpm:before {
+            content: '';
+            position: absolute;
+            width: 60%;
+            height: 100%;
+            top: -10%;
+            left: 20%;
+            scale: 3;
+        }
+    `);
+
+    // ========== MIXER FIX (the missing part) ==========
+    function unlockMixer() {
+        document.querySelectorAll('button[id^="mixer-solo-"], button[id^="mixer-mute-"]').forEach(btn => {
+            btn.removeAttribute('disabled');
+            btn.style.pointerEvents = 'auto';
+            btn.style.opacity = '1';
+            btn.querySelectorAll('svg use[href*="lock"], svg use[*|href*="lock"], svg use[href*="addtrack"]').forEach(use => {
+                const svg = use.closest('svg');
+                if (svg) svg.style.setProperty('display', 'none', 'important');
+            });
+        });
+    }
+
+    // Force synth source when needed
+    function forceSynth() {
+        const input = document.querySelector('#control-source input[value="synth"]');
+        if (input && !input.checked) {
+            const label = input.closest('label');
+            if (label) label.click();
+            else input.click();
+        }
+    }
+
+    // Catch clicks on mixer buttons
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('button[id^="mixer-solo-"], button[id^="mixer-mute-"]');
+        if (!btn) return;
+
+        // Always force synth + unlock before the click goes through
+        forceSynth();
+        unlockMixer();
+    }, true);
+
+    // ========== CONTINUOUS UNLOCK ==========
+    setInterval(() => {
+        // Main controls
+        ['control-speed', 'control-loop', 'control-solo', 'control-mute',
+            'control-pitchshift', 'control-print', 'control-export',
+            'control-metronome', 'control-transpose', 'control-voice-practice'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.querySelectorAll('svg use[href*="lock"]').forEach(u => {
+                    const s = u.closest('svg');
+                    if (s) s.style.setProperty('display', 'none', 'important');
+                });
+                el.removeAttribute('disabled');
+                el.removeAttribute('aria-disabled');
+                el.classList.remove('Cny223');
+                el.style.pointerEvents = 'auto';
+            });
+
+        // Mixer
+        unlockMixer();
+
+        // Hide upsells
+        document.querySelectorAll('#promo, #menu-plus, a[href="/plus"]').forEach(el => {
+            el.style.setProperty('display', 'none', 'important');
+        });
+    }, 800);
 })();
