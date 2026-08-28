@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.4.0
+// @version 1.4.1-DEV
 // @description Trick Songsterr to unlock plus features.
 // @license MIT
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -27,25 +27,22 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
     /// Common object accessible to both internal and injected functions.
     const common = {
         cfg: {
-            enablePlusPatches: true,
+            enablePlusPatches: false,
             enableLateFixes: true,
             debugSourcePatcher: false,
             debugSiteEvents: null,
-            cancelSiteEventCuriosity: false,
+            cancelSiteEventCuriosity: true,
             cancelSiteOtherCuriosity: true,
             cancelSitePromo: true,
             cancelSiteExperiments: true
         },
-        log: function (...args) {
-            console.log("[SongsterrPlusPatcher] " + args.join(" "));
-        },
-        warn: function (...args) {
-            console.warn("[SongsterrPlusPatcher] " + args.join(" "));
-        },
+        log: (...args) => console.log("[SongsterrPlusPatcher] " + args.join(" ")),
+        warn: (...args) => console.warn("[SongsterrPlusPatcher] " + args.join(" ")),
+        error: (...args) => console.error("[SongsterrPlusPatcher] " + args.join(" ")),
         broken: function (msg) {
-            this.log("Broken: " + msg);
-            window.alert("SongsterrPlusPatcher has detected it is broken due to site changes. Please disable the userscript until an update has been published to avoid problems, after which you may reload the page.");
-            window.location.reload();
+            this.error("Broken: " + msg);
+            const alertConfirmed = window.confirm("SongsterrPlusPatcher has detected it is broken due to site changes. Please disable the userscript until an update has been published to avoid problems. The page will reload when you confirm.");
+            if (alertConfirmed) window.location.reload();
         }
     };
 
@@ -71,6 +68,8 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             enumerable: false
         }
     );
+
+    /***** Source-injected hooks *****/
 
     const appClientEntryHook = async function (common) {
         // NOTE: This function gets injected to appClient source with .toString(), so we don't have the script's lexical scope in here.
@@ -123,14 +122,7 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             common.log("Running late UI hook");
 
             if (common.cfg.enableLateFixes) {
-                // Remove ?demo=enabled from the URL (without reloading or ruining history though!), since the site may add that (given we are in demo mode).
-                const url = new URL(window.location.href);
-                if (url.searchParams.has("demo")) {
-                    url.searchParams.delete("demo");
-                    window.history.replaceState({}, "", url);
-                }
-
-                // Since the site thinks we're in demo mode, some links have ?demo=enabled appended to them (e.g. the mixer parts).
+                // Since we're in demo mode, some links have ?demo=enabled appended to them (e.g. the mixer parts).
                 // We don't need that nor do we really want to confuse the server with demo mode when it disagrees.
                 const demoLinkElements = document.querySelectorAll("a[href*='?demo=']");
                 for (const demoLinkElement of demoLinkElements) {
@@ -196,10 +188,16 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
                 case "@changed": {
                     const changedState = eventDataArgs[0];
 
-                    if (changedState.screen != null || changedState.player != null || changedState.layer != null) {
-                        // Incredibly fucking stupid hook for UI patches. This is here with that delay because I couldn't find the right place to hook this to.
-                        // Let's just hope that all the DOM we want to mess with has loaded by 50ms from now on... TODO: Fix this shit
+                    if (changedState.layer != null) {
+                        // Some layers have content that is dynamically added to the DOM. We'll have to rerun the late hook to apply any patches to those.
                         setTimeout(lateUiHook, 50);
+                    } else if (changedState.runningThunks != null) {
+                        // This is javascriptism for a working "changedState.runningThunks == {}" by value.
+                        if (Object.keys(changedState.runningThunks).length == 0) {
+                            // All thunks finished running. We're using this as a trigger for when the whole tab viewer DOM has loaded.
+                            // This is even more stupid than the previous stupid, but somehow it's more reliable than the other things I tried...
+                            setTimeout(lateUiHook, 50);
+                        }
                     }
 
                     break;
@@ -226,47 +224,11 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
         );
     };
 
-    function fixRelocatedScriptRelatives(src, scriptOriginalSourceUrl) {
-        // Since a patched script isn't being loaded from it's original URL, we must resolve any relative javascript imports manually to the right URL.
-        src = src.replaceAll(
-            // I know I know, I should be burned alive for using regex to parse this. Don't really care all that much to be honest.
-            /["'`](\.+\/[^"'`]+.js)["'`]/g,
-            (match, capturedPath, ..._args) => {
-                const canonicalPath = new URL(capturedPath, scriptOriginalSourceUrl).href;
-                if (common.cfg.debugSourcePatcher) common.log(`Canonicalized relative script URL in patched script: ${capturedPath} -> ${canonicalPath}`);
-                return `"${canonicalPath}"`;
-            }
-        );
+    /***** Script Source patchers *****/
 
-        return src;
-    }
+    const sourcePatchAppClient = async (src, scriptOriginUrl) => {
+        common.log("src: " + src + ", origin: " + scriptOriginUrl);
 
-    /*
-    UNUSED FOR NOW, but better keep this around in case we need to do more source patching outside of appClient.
-    async function getScriptSourceWithPatchedImport(src, originalSourceUrl, importUrl, importedSourcePatcher) {
-        // The import URL is most likely relative to the URL of the script that is importing it.
-        // Canonicalize it to the original URL of the importing script (which should already be absolute!).
-        const importedUrlCanonical = new URL(importedUrl, originalSourceUrl).href;
-
-        common.log(`fetching script for patching from: ${importedUrlCanonical} (in source: ${importedUrl})`);
-        const scriptSourceResponse = await GM.xmlHttpRequest({ url: importedUrlCanonical, anonymous: true });
-        if ((scriptSourceResponse.status < 200 || scriptSourceResponse.status > 299) && (scriptSourceResponse.status < 500 || scriptSourceResponse.status > 599)) {
-            common.broken(`imported script fetch responded with status ${scriptSourceResponse.status}: ${importedUrlCanonical}`);
-        }
-
-        const scriptSource = scriptSourceResponse.responseText;
-        const scriptSourceFixed = fixRelocatedScriptRelatives(scriptSource, importedUrlCanonical);
-        const scriptSourcePatched = await importedSourcePatcher(scriptSource, importedUrlCanonical);
-
-        // We now a patched version of the imported script. We still need to modify this script to import the patched version instead of the original.
-        const scriptSourcePatchedBlobUrl = URL.createObjectURL(new Blob([scriptSourcePatched], { type: "text/javascript" }));
-        src = src.replaceAll(importedUrl, scriptSourcePatchedBlobUrl);
-        return src;
-    }
-    */
-
-    async function patchAppClientScriptSource(src, originalSourceUrl) {
-        /***** Plus patches *****/
         if (common.cfg.enablePlusPatches) {
             // This is so stupid. We are patching hardcoded demo song id checks with this.
             src = src
@@ -274,7 +236,6 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
                 .replaceAll("!==27", "!==27 && false");
         }
 
-        /***** Hook injections for running code in the context of this script *****/
         // Inject our entry hook as the very first thing in the script.
         src = `
             await ( ${appClientEntryHook.toString()} )(window.${commonObjectGlobalIdentifier});
@@ -286,11 +247,8 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
          * On second thought, maybe they actually should burn me alive for writing these regexes. Jesus fucking christ.
          * The proper way to do this would be to parse the script to an AST, make our modifications using that, and then reconstruct the script from the AST. Don't use these regexes as an example, please.
          */
-        const ctxVariableIdentifier = src.match(/(\w+)=\w+\({state:JSON\.parse/)?.[1];
-        const storeVariableIdentifier = src.match(new RegExp(String.raw`(\w+)=${ctxVariableIdentifier}\.get\(\w+\.Store\)`))?.[1];
-        if (ctxVariableIdentifier == null || storeVariableIdentifier == null) {
-            common.broken(`Didn't find parameter(s) for context hook (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
-        }
+        const [_match, ctxVariableIdentifier, storeVariableIdentifier] = src.match(/let\s*(\w+)\s*=[^,]+,\s*(\w+)\s*=\s*\w+\.get\([^.]+\.Store\)/)
+            ?? common.broken(`Didn't find parameter(s) for context hook (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
 
         let appliedHook = false;
         src = src.replace(
@@ -306,50 +264,155 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             common.broken(`Didn't find injection point for context hook (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
         }
 
-        /***** Patching of imported scripts *****/
-        //src = await getScriptSourceWithPatchedImport(src, originalSourceUrl, commonScriptSourceUrl, patchCommonScriptSource);
+        return src;
+    }
+    const sourcePatchCommon = async (src, originalSourceUrl) => {
+        // Don't add the demo=enabled URL parameter since we're in demo mode.
+        src = src.replaceAll(".searchParams.set(`demo`, `enabled`)", ";");
 
         return src;
     }
-    function patchAndDivertAppClient() {
-        const appClientElement = document.querySelector("script[src*='appClient']");
-        const appClientSrcUrl = appClientElement?.src;
-        common.log("Fetching appClient from: " + appClientSrcUrl);
 
+    /***** Source-patching framework *****/
+
+    const sourcePatcherRegistry = [
+        [/.*appClient-.*\.js/, sourcePatchAppClient],
+        [/.*common-.*\.js/, sourcePatchCommon],
+    ];
+
+    const sourcePatcherCache = new Map();
+
+    async function downloadScriptSource(url) {
+        const response = await GM.xmlHttpRequest({
+            url,
+            anonymous: true
+        });
+
+        if ((response.status < 200 || response.status > 299) && (response.status < 500 || response.status > 599)) {
+            common.broken(`Script fetch responded with status ${response.status}: ${url}`);
+        }
+
+        return response.responseText;
+    }
+    function downloadScriptSourceSync(url, onDownloaded) {
         GM.xmlHttpRequest({
             url: appClientSrcUrl,
             anonymous: true,
-            onload: async scriptSourceResponse => {
-                if ((scriptSourceResponse.status < 200 || scriptSourceResponse.status > 299) && (scriptSourceResponse.status < 500 || scriptSourceResponse.status > 599)) {
-                    common.broken("appClient fetch responded with status " + scriptSourceResponse.status);
+            onload: async (response) => {
+                if ((response.status < 200 || response.status > 299) && (response.status < 500 || response.status > 599)) {
+                    common.broken(`Script fetch responded with status ${response.status}: ${url}`);
                 }
 
-                const scriptSource = scriptSourceResponse.responseText;
-                const scriptSourceFixed = fixRelocatedScriptRelatives(scriptSource, appClientSrcUrl);
-                const scriptSourcePatched = await patchAppClientScriptSource(scriptSourceFixed, appClientSrcUrl);
-
-                /*
-                Alternative method which seems to have some problems. Didn't bother looking more into it, as the method below is sure to work.
-                const patchedAppClientObjectUrl = URL.createObjectURL(new Blob([sourcePatched], { type: "text/javascript" }));
-                await import(patchedAppClientObjectUrl);
-                URL.revokeObjectURL(patchedAppClientObjectUrl);
-                common.log("Patched appClient exited")
-                */
-                let patchedScriptElement = document.createElement("script");
-                patchedScriptElement.async = true;
-                patchedScriptElement.type = "module";
-                patchedScriptElement.crossOrigin = "anonymous";
-                patchedScriptElement.textContent = scriptSourcePatched;
-                document.body.appendChild(patchedScriptElement);
+                const scriptSource = response.responseText;
+                await onDownloaded(scriptSource);
             },
-            onerror: err => {
-                common.log("Error fetching appClient: " + err);
+            onerror: (err) => {
+                common.error("Downloading script source: " + err);
             }
         });
-
-        // We'll continue in the async world of xmlHttpRequest's onload. In this scope, we're done, and should prevent anything more from executing.
-        throw new Error("Stopping execution of original script prematurely. THIS IS INTENTIONAL BEHAVIOR, YOU MAY DISREGARD.");
     }
+
+    async function sourcePatch(src, srcOriginUrlCanonical) {
+        async function sourcePatchImport(importUrl) {
+            // Canonicalize the import URL against this script's origin URL, so that relative URLs get resolved correctly.
+            const importUrlCanonical = new URL(importUrl, srcOriginUrlCanonical).href;
+
+            // Download the imported script, patch it and return the object URL of the patched script for the import.
+            const importScriptSource = await downloadScriptSource(importUrlCanonical);
+            return await sourcePatch(importScriptSource, importUrlCanonical);
+        }
+
+        async function asyncReplaceAll(haystack, pattern, substitutionProvider) {
+            const patternMatches = Array.from(haystack.matchAll(pattern));
+            const patternMatchSubstitutions = await Promise.all(patternMatches.map(substitutionProvider));
+
+            let substitutedHaystackBuffer = "";
+            let prevMatchEndIndex = 0;
+            for (const [i, match] of patternMatches.entries()) {
+                const matchStartIndex = match.index;
+
+                // Add everything from between the end of the previous match and the start of this match.
+                // This way we leave out only the matches, adding their substitutions after this slice.
+                substitutedHaystackBuffer += haystack.slice(prevMatchEndIndex, matchStartIndex);
+                substitutedHaystackBuffer += patternMatchSubstitutions[i];
+
+                // Match[0] means the entire capture of the match. Subsequent indices would be captured groups.
+                prevMatchEndIndex = matchStartIndex + match[0].length;
+            }
+
+            // Still have the remainder of haystack after the last match to add.
+            substitutedHaystackBuffer += haystack.slice(prevMatchEndIndex);
+
+            return substitutedHaystackBuffer;
+        }
+
+        if (sourcePatcherCache.has(srcOriginUrlCanonical)) {
+            // There already exists a patched instance of this script, use that.
+            // This is not just an optimization, but a requirement for getting correct behavior when the same module script is imported many times.
+            return sourcePatcherCache.get(srcOriginUrlCanonical);
+        }
+
+        // Patch all module imports. This serves two purposes: recursive module patching, but more importantly, getting rid of relative import URLs
+        // which would resolve incorrectly in the patched script, because the patched script is not located at it's original URL.
+        src = await asyncReplaceAll(
+            src,
+            /import\s*\(\s*["'`]([^"'`]*)["'`]\s*\)/g,
+            async ([match, importUrl]) => {
+                if (common.cfg.debugSourcePatcher) common.log(`Extracted import URL "${importUrl}": ${match}`);
+                const sourcePatchedImportUrl = await sourcePatchImport(importUrl);
+                return `import("${sourcePatchedImportUrl}")`;
+            }
+        );
+        src = await asyncReplaceAll(
+            src,
+            // This is unreadable even for a regex. Hope it works.
+            /from\s*["'`]((?:(?:https?)?:\/\/[^\/]*)?\.?\/[%\-./0-9A-z]*)["'`]/g,
+            async ([match, importUrl]) => {
+                if (common.cfg.debugSourcePatcher) common.log(`Extracted import URL "${importUrl}": ${match}`);
+                const sourcePatchedImportUrl = await sourcePatchImport(importUrl);
+                return `from "${sourcePatchedImportUrl}"`;
+            }
+        );
+
+        // Run matching source patchers from the registry.
+        for (const [patcherMatcher, patcher] of sourcePatcherRegistry.values()) {
+            if (!patcherMatcher.test(srcOriginUrlCanonical)) continue;
+            src = await patcher(src, srcOriginUrlCanonical);
+        }
+
+        // We now a patched version of the script source. We must still create a blob object URL out of it.
+        // This way we can easily update `import` calls to the patched script, and since we're caching these object URLs
+        // we also get the expected "single execution" behavior when it is imported multiple times, just like with the original scripts.
+        const patchedSourceBlobUrl = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+        sourcePatcherCache.set(srcOriginUrlCanonical, patchedSourceBlobUrl);
+
+        if (common.cfg.debugSourcePatcher) {
+            common.log(`Source-patched "${srcOriginUrlCanonical.split('/').at(-1)}": ${patchedSourceBlobUrl}`);
+        }
+
+        return patchedSourceBlobUrl;
+    }
+
+    async function createSourcePatchedScriptElementFromScriptElement(scriptElement) {
+        let scriptSource = scriptElement.src != null
+            ? await downloadScriptSource(scriptElement.src)
+            : scriptElement.textContent;
+
+        let scriptOriginUrlCanonical = scriptElement.src != null
+            ? new URL(scriptElement.src, window.location.href).href
+            : window.location.href;
+
+        const patchedScriptBlobUrl = await sourcePatch(scriptSource, scriptOriginUrlCanonical);
+
+        const patchedScriptElement = document.createElement("script");
+        patchedScriptElement.src = patchedScriptBlobUrl;
+        patchedScriptElement.type = scriptElement.type;
+        patchedScriptElement.async = scriptElement.async;
+        patchedScriptElement.crossOrigin = scriptElement.crossOrigin;
+        document.body.appendChild(patchedScriptElement);
+    }
+
+    /***** Initial source-patch hook *****/
 
     // The site's appClient script reads __APP_INITIALIZED very early on (before it has read state or anything like that).
     // Hook a getter in front of that variable, where we will run our early patching code, before appClient gets a chance to do anything meaningful.
@@ -362,8 +425,14 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             get() {
                 if (!appClientPatched) {
                     appClientPatched = true;
-                    patchAndDivertAppClient();
-                    // unreachable();
+
+                    // Source-patch the appClient script and add it as a script element so it'll start running soon.
+                    const appClientElement = document.querySelector("script[src*='appClient']") ?? common.broken("Didn't find appClient script element");
+                    createSourcePatchedScriptElementFromScriptElement(appClientElement);
+
+                    // We should currently be running in the original appClient script.
+                    // We don't want this original script to continue running and interfere with the patched script, so just throw an error to stop it dead on its tracks.
+                    throw new Error("Stopping execution of original appClient prematurely. THIS IS INTENTIONAL BEHAVIOR, YOU MAY DISREGARD.")
                 }
 
                 return appInitializedValue;
