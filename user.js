@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name Songsterr Plus Patcher
 // @namespace https://github.com/Strikeless
-// @version 1.4.0
+// @version 1.4.1
 // @description Trick Songsterr to unlock plus features.
 // @license MIT
 // @supportURL https://github.com/Strikeless/SongsterrPlusPatcher
@@ -146,12 +146,6 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
                 const topBarPlusButtonElement = document.querySelector("div:has(> #menu-plus)");
                 if (topBarPlusButtonElement != null) topBarPlusButtonElement.remove();
                 */
-
-                const headerRegenerateElement = document.getElementById("header-regenerate");
-                // headerRegenerateElement?.remove();
-
-                const headerPrintElement = document.getElementById("header-print");
-                // headerPrintElement?.remove();
             }
         }
 
@@ -196,10 +190,16 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
                 case "@changed": {
                     const changedState = eventDataArgs[0];
 
-                    if (changedState.screen != null || changedState.player != null || changedState.layer != null) {
-                        // Incredibly fucking stupid hook for UI patches. This is here with that delay because I couldn't find the right place to hook this to.
-                        // Let's just hope that all the DOM we want to mess with has loaded by 50ms from now on... TODO: Fix this shit
+                    if (changedState.layer != null) {
+                        // Some layers have content that is dynamically added to the DOM. We'll have to rerun the late hook to apply any patches to those.
                         setTimeout(lateUiHook, 50);
+                    } else if (changedState.runningThunks != null) {
+                        // This is javascriptism for a working "changedState.runningThunks == {}" by value.
+                        if (Object.keys(changedState.runningThunks).length == 0) {
+                            // All thunks finished running. We're using this as a trigger for when the whole tab viewer DOM has loaded.
+                            // This is even more stupid than the previous stupid, but somehow it's more reliable than the other things I tried...
+                            setTimeout(lateUiHook, 50);
+                        }
                     }
 
                     break;
@@ -241,30 +241,6 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
         return src;
     }
 
-    /*
-    UNUSED FOR NOW, but better keep this around in case we need to do more source patching outside of appClient.
-    async function getScriptSourceWithPatchedImport(src, originalSourceUrl, importUrl, importedSourcePatcher) {
-        // The import URL is most likely relative to the URL of the script that is importing it.
-        // Canonicalize it to the original URL of the importing script (which should already be absolute!).
-        const importedUrlCanonical = new URL(importedUrl, originalSourceUrl).href;
-
-        common.log(`fetching script for patching from: ${importedUrlCanonical} (in source: ${importedUrl})`);
-        const scriptSourceResponse = await GM.xmlHttpRequest({ url: importedUrlCanonical, anonymous: true });
-        if ((scriptSourceResponse.status < 200 || scriptSourceResponse.status > 299) && (scriptSourceResponse.status < 500 || scriptSourceResponse.status > 599)) {
-            common.broken(`imported script fetch responded with status ${scriptSourceResponse.status}: ${importedUrlCanonical}`);
-        }
-
-        const scriptSource = scriptSourceResponse.responseText;
-        const scriptSourceFixed = fixRelocatedScriptRelatives(scriptSource, importedUrlCanonical);
-        const scriptSourcePatched = await importedSourcePatcher(scriptSource, importedUrlCanonical);
-
-        // We now a patched version of the imported script. We still need to modify this script to import the patched version instead of the original.
-        const scriptSourcePatchedBlobUrl = URL.createObjectURL(new Blob([scriptSourcePatched], { type: "text/javascript" }));
-        src = src.replaceAll(importedUrl, scriptSourcePatchedBlobUrl);
-        return src;
-    }
-    */
-
     async function patchAppClientScriptSource(src, originalSourceUrl) {
         /***** Plus patches *****/
         if (common.cfg.enablePlusPatches) {
@@ -288,24 +264,21 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
          * The proper way to do this would be to parse the script to an AST, make our modifications using that, and then reconstruct the script from the AST. Don't use these regexes as an example, please.
          * Regex isn't thaaat bad, right?
          */
-        const match = src.match(
+        const ctxStoreDefinitionMatch = src.match(
             /(\w+)=(\w+)\.get\(\w+\.Store\)[^;]*;/
         );
-
-        if (!match) {
+        if (ctxStoreDefinitionMatch == null) {
             common.broken("Didn't find context/store variables");
             return src;
         }
+        const [ctxStoreDefinition, storeVariableIdentifier, ctxVariableIdentifier] = ctxStoreDefinitionMatch;
 
-        const [, storeVar, ctxVar] = match;
-
-        const hook = `await (${appClientContextHook})(
-            window.${commonObjectGlobalIdentifier},${ctxVar},${storeVar});`;
-
-        src = src.replace(match[0], `${match[0]}${hook}`);
-
-        /***** Patching of imported scripts *****/
-        //src = await getScriptSourceWithPatchedImport(src, originalSourceUrl, commonScriptSourceUrl, patchCommonScriptSource);
+        const contextHook = `await (${ appClientContextHook.toString() })(
+            window.${commonObjectGlobalIdentifier},
+            ${ctxVariableIdentifier},
+            ${storeVariableIdentifier}
+        );`;
+        src = src.replace(ctxStoreDefinition, `${ctxStoreDefinition}${contextHook}`);
 
         return src;
     }
