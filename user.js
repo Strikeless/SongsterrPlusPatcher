@@ -148,10 +148,10 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
                 */
 
                 const headerRegenerateElement = document.getElementById("header-regenerate");
-                headerRegenerateElement?.remove();
+                // headerRegenerateElement?.remove();
 
                 const headerPrintElement = document.getElementById("header-print");
-                headerPrintElement?.remove();
+                // headerPrintElement?.remove();
             }
         }
 
@@ -271,7 +271,8 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
             // This is so stupid. We are patching hardcoded demo song id checks with this.
             src = src
                 .replaceAll("===27", "===27 || true")
-                .replaceAll("!==27", "!==27 && false");
+                .replaceAll("!==27", "!==27 && false")
+                .replace(/\w+\(window\.location\.pathname\)/g, '27');
         }
 
         /***** Hook injections for running code in the context of this script *****/
@@ -285,26 +286,23 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
          * Inject our context hook after the context object is created in the initializer function.
          * On second thought, maybe they actually should burn me alive for writing these regexes. Jesus fucking christ.
          * The proper way to do this would be to parse the script to an AST, make our modifications using that, and then reconstruct the script from the AST. Don't use these regexes as an example, please.
+         * Regex isn't thaaat bad, right?
          */
-        const ctxVariableIdentifier = src.match(/(\w+)=\w+\({state:JSON\.parse/)?.[1];
-        const storeVariableIdentifier = src.match(new RegExp(String.raw`(\w+)=${ctxVariableIdentifier}\.get\(\w+\.Store\)`))?.[1];
-        if (ctxVariableIdentifier == null || storeVariableIdentifier == null) {
-            common.broken(`Didn't find parameter(s) for context hook (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
+        const match = src.match(
+            /(\w+)=(\w+)\.get\(\w+\.Store\)[^;]*;/
+        );
+
+        if (!match) {
+            common.broken("Didn't find context/store variables");
+            return src;
         }
 
-        let appliedHook = false;
-        src = src.replace(
-            new RegExp(String.raw`(?<=${storeVariableIdentifier}=${ctxVariableIdentifier}\.get\(\w+\.Store[^;]+);`),
-            (..._args) => {
-                appliedHook = true;
-                return `; await ( ${appClientContextHook.toString()} )(window.${commonObjectGlobalIdentifier}, ${ctxVariableIdentifier}, ${storeVariableIdentifier});`;
-            }
-        );
-        if (appliedHook) {
-            common.log(`Found context hook injection point (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
-        } else {
-            common.broken(`Didn't find injection point for context hook (ctx: ${ctxVariableIdentifier}, store: ${storeVariableIdentifier})`);
-        }
+        const [, storeVar, ctxVar] = match;
+
+        const hook = `await (${appClientContextHook})(
+            window.${commonObjectGlobalIdentifier},${ctxVar},${storeVar});`;
+
+        src = src.replace(match[0], `${match[0]}${hook}`);
 
         /***** Patching of imported scripts *****/
         //src = await getScriptSourceWithPatchedImport(src, originalSourceUrl, commonScriptSourceUrl, patchCommonScriptSource);
